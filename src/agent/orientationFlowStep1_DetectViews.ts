@@ -3,20 +3,20 @@ import { ai } from './genkit.config';
 import { OrientationStepResultSchema, ViewLayoutSchema } from '../lib/schemas';
 
 const Step1InputSchema = z.object({
-    fileUri: z.string(),
-    rejectionFeedback: z.string().optional(),
+  fileUri: z.string(),
+  rejectionFeedback: z.string().optional(),
 });
 
 const Step1OutputSchema = OrientationStepResultSchema;
 
 export const orientationFlowStep1_DetectViews = ai.defineFlow(
-    {
-        name: 'orientationFlowStep1_DetectViews',
-        inputSchema: Step1InputSchema,
-        outputSchema: Step1OutputSchema,
-    },
-    async (input) => {
-        const systemPrompt = `You are analyzing a machinist technical drawing (print).
+  {
+    name: 'orientationFlowStep1_DetectViews',
+    inputSchema: Step1InputSchema,
+    outputSchema: Step1OutputSchema,
+  },
+  async (input) => {
+    const systemPrompt = `You are analyzing a machinist technical drawing (print).
 
 COORDINATE SYSTEM (CRITICAL):
 - All coordinates use a normalized 0–1000 space.
@@ -58,31 +58,31 @@ Use strokeColor "#00FF00" (green) for the primary view box and "#FFFF00" (yellow
 Do NOT include cropWindow for Step 1.
 The "question" field MUST be exactly: "Are these the bounding boxes for the views, and is the highlighted one the primary view?"`;
 
-        const rejectionNote = input.rejectionFeedback
-            ? `\n\nThe user rejected your previous proposal. Their feedback: "${input.rejectionFeedback}". Try again with a revised answer.`
-            : '';
+    const rejectionNote = input.rejectionFeedback
+      ? `\n\nThe user rejected your previous proposal. Their feedback: "${input.rejectionFeedback}". Try again with a revised answer.`
+      : '';
 
-        const { output } = await ai.generate({
-            model: 'gemini-3-flash-preview',
-            config: {
-                thinkingLevel: 'MINIMAL',
-                mediaResolution: 'medium',
-            },
-            output: { schema: Step1OutputSchema },
-            prompt: [
-                { media: { url: input.fileUri } },
-                { text: systemPrompt + rejectionNote },
-            ],
-        });
+    const { output } = await ai.generate({
+      model: 'googleai/gemini-3-flash-preview',
+      config: {
+        thinkingLevel: 'MINIMAL',
+        mediaResolution: 'medium',
+      },
+      output: { schema: Step1OutputSchema },
+      prompt: [
+        { media: { url: input.fileUri } },
+        { text: systemPrompt + rejectionNote },
+      ],
+    });
 
-        if (!output) {
-            throw new Error('No output from orientationFlowStep1_DetectViews');
-        }
-
-        // Ensure the fixed question string is always correct
-        return {
-            ...output,
-            question: 'Are these the bounding boxes for the views, and is the highlighted one the primary view?',
-        };
+    if (!output) {
+      throw new Error('No output from orientationFlowStep1_DetectViews');
     }
+
+    // Ensure the fixed question string is always correct
+    return {
+      ...output,
+      question: 'Are these the bounding boxes for the views, and is the highlighted one the primary view?',
+    };
+  }
 );

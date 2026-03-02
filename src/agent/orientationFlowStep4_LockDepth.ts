@@ -88,7 +88,7 @@ The sourceViewId MUST reference a non-primary view.`;
             : '';
 
         const { output } = await ai.generate({
-            model: 'gemini-3-flash-preview',
+            model: 'googleai/gemini-3-flash-preview',
             config: {
                 thinkingLevel: 'HIGH',
                 mediaResolution: 'high',

@@ -66,7 +66,7 @@ The "question" field MUST be exactly: "Does this box accurately capture the over
             : '';
 
         const { output } = await ai.generate({
-            model: 'gemini-3-flash-preview',
+            model: 'googleai/gemini-3-flash-preview',
             config: {
                 thinkingLevel: 'MINIMAL',
                 mediaResolution: 'medium',

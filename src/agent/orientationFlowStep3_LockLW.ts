@@ -69,7 +69,7 @@ The length value MUST be >= the width value.`;
             : '';
 
         const { output } = await ai.generate({
-            model: 'gemini-3-flash-preview',
+            model: 'googleai/gemini-3-flash-preview',
             config: {
                 thinkingLevel: 'HIGH',
                 mediaResolution: 'high',

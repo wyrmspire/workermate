@@ -95,7 +95,7 @@ ${primaryBox ? `- Place origin near: x=${Math.round(primaryBox.x + primaryBox.w 
             : '';
 
         const { output } = await ai.generate({
-            model: 'gemini-3-flash-preview',
+            model: 'googleai/gemini-3-flash-preview',
             config: {
                 thinkingLevel: 'HIGH',
                 mediaResolution: 'high',
