@@ -1,89 +1,60 @@
 # WorkerMate — Machinist Print Analyzer
 
-An AI-powered tool that reads 2D machinist prints (engineering drawings), reasons about their geometry through a guided human-in-the-loop workflow, and renders the final part as an interactive 3D model.
+Upload a machinist print image, guide the AI through a 5-step Orientation Wizard to establish the dimensions and datums, and eventually build a CSG 3D model.
 
 ---
 
-## The Problem
+## Current Milestone: Phase 1 (Orientation Wizard)
 
-Reading a machinist print is hard. You need to cross-reference multiple orthographic views, decode GD&T callouts, mentally assemble where features live in 3D space, and pick the right datums before you can even think about programming a CNC machine. This project automates that first-pass reading.
+Right now, the project is strictly focused on **Phase 1: The 5-Step Orientation Wizard**. 
+- We only determine Length, Width, Depth (Thickness), and datums.
+- **NO FEATURES are analyzed.** No pockets, no holes, no CSG generation.
+- The system must not attempt “print → full 3D” in one shot. Features are deferred to Phase 2.
 
-## What WorkerMate Does
+## The Problem (Why a 5-step wizard?)
 
-1. **Upload** — You drop a machinist print image into a chat interface.
-2. **Envelope Pass** — The AI identifies the overall part envelope (Length × Width × Height) by reasoning across all views. It overlays its choices on the print for you to confirm or reject.
-3. **Feature Pass** — Once the envelope is locked, the AI identifies every boolean operation (holes, pockets, slots, chamfers, radii) and marks them on the print with arrows and labels.
-4. **Validation Loop** — At each stage you get checkboxes. Approve correct items; reject wrong ones. The AI re-analyzes only the rejected items using your feedback.
-5. **3D Render** — Once every feature is confirmed, the app generates a Three.js 3D model by subtracting features from a solid stock block using CSG boolean operations.
+Reading a machinist print is highly ambiguous. The exact same numerical value (e.g., 120.0) can appear in multiple views, representing different axes depending on the view. Trying to deduce the entire part in one prompt leads to compounded hallucination errors. 
 
----
-
-## Tech Stack
-
-| Layer | Technology | Why |
-|---|---|---|
-| Framework | Next.js (App Router) | Server components, API routes, fast dev loop |
-| AI Orchestration | Genkit (`@genkit-ai/google-genai`) | Structured flows, Zod schemas, vision model support |
-| Vision Model | Gemini 2.5 Pro | Best-in-class image understanding for engineering drawings |
-| 3D Engine | Three.js + `three-bvh-csg` | Fast CSG booleans, standard Three.js workflow |
-| Fallback CSG | `manifold-3d` (WASM) | CAD-grade robustness if `three-bvh-csg` produces artifacts |
-| UI | React + CSS (clean, functional) | Simple confirmation UIs, not a design showcase |
+By breaking the orientation into 5 microscopic steps with human confirmation at every stage, we lock in known facts before proceeding. The human answers "Yes" or "No". A "No" immediately retries that specific step with user feedback.
 
 ---
 
-## Quick Start
+## Tech Stack (Docs Only)
 
-```bash
-# 1. Clone
-git clone https://github.com/wyrmspire/workermate.git
-cd workermate
+- **AI Orchestration**: Genkit (handles flows, Zod schemas, structured outputs, user feedback looping).
+- **Vision Model**: **Gemini 3 Flash ONLY `gemini-3-flash-preview`**.
+- **Image Handling**: Google AI Files API (upload once, pass `fileUri` to all subsequent steps).
+- **UI**: Overlay-driven validation. React renders boxes, arrows, and lines over the image based on Genkit's normalized 0-1000 coordinate output.
 
-# 2. Install
-npm install
+---
 
-# 3. Configure
-cp .env.example .env.local
-# Edit .env.local with your GEMINI_API_KEY
+## The 5-Step Orientation Wizard
 
-# 4. Run
-npm run dev
-```
+1. **Detect Views**: Map out the bounding boxes of all orthographic/isometric views.
+2. **Confirm Envelope**: Outline the overall bounding box of the part in the primary view.
+3. **Lock L/W**: Confirm the Length and Width axes and their specific values.
+4. **Lock Depth**: Find the best alternate view to confirm Depth (thickness).
+5. **Final Summary**: Map L/W/D to the 3D space, establish the primary datum face, and lock orientation.
 
 ---
 
 ## Project Structure
 
-```
+```text
 workermate/
-├── agents.md              ← Rules for AI agents working in this repo
-├── ARCHITECTURE.md        ← System design, data flow, state machine
-├── README.md              ← You are here
-├── .env.example           ← Template for environment variables
+├── docs/                      ← Deep-dive architecture and specs
+│   ├── 00_ROADMAP.md
+│   ├── 01_ORIENTATION_WIZARD.md
+│   ├── 02_OVERLAYS.md
+│   ├── 03_MODEL_CONFIG.md
+│   └── 04_FEATURES_PHASE_2_PREVIEW.md
+├── agents.md                  ← Hard rules for AI coding agents
+├── ARCHITECTURE.md            ← Phase 1 Data contracts and State Machine
+├── README.md                  ← You are here
 │
 ├── src/
-│   ├── agent/             ← Genkit flows, prompts, schemas
-│   │   └── README.md      ← AI flow documentation
-│   ├── app/               ← Next.js pages + API routes
-│   │   └── README.md      ← Routing documentation
-│   ├── components/        ← React UI components
-│   │   └── README.md      ← Component catalog
-│   └── lib/               ← 3D geometry, CSG utilities
-│       └── README.md      ← CSG pipeline documentation
-│
-├── printcode.sh           ← Dump source for LLM context
-├── gitr.sh                ← Quick git commit + push
-└── gitrdif.sh             ← Git diff report generator
+│   ├── agent/                 ← Genkit flows (5 steps)
+│   ├── app/                   ← API routes and Next.js shell
+│   ├── components/            ← UI (ImageOverlay, YesNoPanel, StepHistory)
+│   └── lib/                   ← (Future) CSG Geometry pipeline
 ```
-
----
-
-## Key Documents
-
-| Document | Audience | Purpose |
-|---|---|---|
-| [agents.md](agents.md) | AI agents | Hard rules, guardrails, naming conventions |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Everyone | System design, state machine, data contracts |
-| [src/agent/README.md](src/agent/README.md) | Developers + AI | Genkit flow specs, prompt engineering notes |
-| [src/components/README.md](src/components/README.md) | Developers + AI | UI component catalog and behavior specs |
-| [src/lib/README.md](src/lib/README.md) | Developers + AI | CSG pipeline, geometry processing |
-| [src/app/README.md](src/app/README.md) | Developers + AI | Page routes, API route contracts |

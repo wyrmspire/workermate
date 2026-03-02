@@ -1,232 +1,139 @@
-# Architecture — WorkerMate
+# Architecture — WorkerMate Phase 1
 
-This document defines the system design, data flow, and state machine for the machinist print analyzer. It is the single source of truth for how the pieces fit together.
-
----
-
-## 1. High-Level Pipeline
-
-```
-┌──────────┐    ┌───────────────┐    ┌────────────────┐    ┌────────────────┐    ┌────────────┐
-│  Upload  │───▶│ Envelope Pass │───▶│  Feature Pass   │───▶│  Validation    │───▶│  3D Render │
-│  (image) │    │  (AI + user)  │    │  (AI + user)    │    │  Loop (user)   │    │  (CSG)     │
-└──────────┘    └───────────────┘    └────────────────┘    └────────────────┘    └────────────┘
-```
-
-Each stage produces structured output that feeds into the next. The user has veto power at every AI stage.
+This document defines the Phase 1 Orientation Wizard state machine, the standard overlay coordinate system, and the data contracts between the AI and the UI.
 
 ---
 
-## 2. Application State Machine
+## 1. State Machine: Phase 1 Wizard
 
-The app progresses through a linear state machine. Backward transitions only happen on user rejection.
+The application session is purely in-memory (no database required yet). We use a linear state machine that only advances on user approval. A rejection loops back to re-run the current state.
 
+```text
+IDLE (Wait for print upload)
+  │
+  ▼
+UPLOADED (File sent to Gemini Files API, fileUri received)
+  │
+  ▼
+ORIENT_STEP_1 (Detect orthographic views)
+  │
+  ▼
+ORIENT_STEP_2 (Confirm part outline envelope in primary view)
+  │
+  ▼
+ORIENT_STEP_3 (Lock Length & Width axes & values)
+  │
+  ▼
+ORIENT_STEP_4 (Lock Depth/Thickness via alternate view)
+  │
+  ▼
+ORIENT_STEP_5 (Final Orientation Summary & Datums)
+  │
+  ▼
+ORIENT_LOCKED (Ready for Phase 2: Features)
 ```
-IDLE
-  │  (user uploads image)
-  ▼
-ANALYZING_ENVELOPE
-  │  (AI returns envelope proposal)
-  ▼
-CONFIRMING_ENVELOPE  ──── reject ────▶ ANALYZING_ENVELOPE (with feedback)
-  │  (user approves all)
-  ▼
-ANALYZING_FEATURES
-  │  (AI returns feature list)
-  ▼
-CONFIRMING_FEATURES  ──── reject ────▶ ANALYZING_FEATURES (with feedback + partial approvals)
-  │  (user approves all)
-  ▼
-GENERATING_3D
-  │  (CSG pipeline completes)
-  ▼
-VIEWING_MODEL
-```
 
-### State Persistence
-- State lives in React client state (useState / useReducer).
-- No database needed for V1. The entire analysis session is ephemeral.
-- The uploaded image and AI responses are kept in memory for the duration of the session.
+No 3D modeling, CSG rendering, or feature detection happens anywhere in this flow.
 
 ---
 
-## 3. Data Contracts
+## 2. Step Definitions
 
-### 3.1 Envelope Analysis Output
+**1) Detect Views**
+- **Action:** Find bounding boxes for all views. Choose the primary view.
+- **Overlay:** Boxes around each view block.
+- **Question:** "Are these the bounding boxes for the views, and is the highlighted one the primary view?"
 
-The AI returns this from `analyzeEnvelopeFlow`. The frontend uses it to draw overlay boxes.
+**2) Confirm Part Outline**
+- **Action:** Trace the tightest bounding box of the physical part inside the primary view (ignoring dimension lines).
+- **Overlay:** Outer perimeter box.
+- **Question:** "Does this box accurately capture the overall part envelope in the primary view?"
+
+**3) Confirm Length + Width**
+- **Action:** Identify the two longest axes in the primary view. Extract their dimension callouts.
+- **Overlay:** Labeled lines or arrows pointing to the extracted dimension text.
+- **Question:** "Are the Length and Width axes and values correct for this primary view?"
+
+**4) Confirm Depth**
+- **Action:** Switch to the best alternate view (e.g., side view or section). Identify the depth/thickness dimension.
+- **Overlay:** Box around the alternate view + marked depth dimension.
+- **Question:** "Is this the correct depth (thickness) dimension?"
+
+**5) Final Summary**
+- **Action:** Summarize L/W/D. Establish the primary datum face logically.
+- **Overlay:** Recap of primary view and alternate view with final XYZ mapping.
+- **Question:** "Lock final orientation?"
+
+---
+
+## 3. Phase 1 Data Contracts (TypeScript Examples)
+
+### The Session State
 
 ```ts
-interface EnvelopeResult {
-  length: Dimension;
-  width:  Dimension;
-  height: Dimension;
-  orientation: 'landscape' | 'portrait';
-  primaryDatumFace: Face;
-  views: ViewIdentification[];
+interface OrientationSession {
+  fileUri: string;              // Google Files API reference
+  currentState: WizardState;
+  
+  // Accumulated truth:
+  confirmedViews?: ViewLayout[];
+  confirmedEnvelope?: OverlaySpec;
+  confirmedLW?: { length: DimensionProposal; width: DimensionProposal };
+  confirmedDepth?: DimensionProposal;
+  lockedDatum?: DatumProposal;
 }
-
-interface Dimension {
-  value: number;         // e.g. 120.0
-  unit: 'mm' | 'in';
-  sourceView: string;    // which view the AI read this from, e.g. "top"
-  confidence: number;    // 0-1
-  overlay: OverlayBox;   // where to draw on the image
-}
-
-interface ViewIdentification {
-  name: string;          // "Front View", "Top View", "Section B-B", etc.
-  type: 'front' | 'top' | 'right' | 'left' | 'bottom' | 'section' | 'detail' | 'isometric';
-  boundingBox: OverlayBox;
-}
-
-interface OverlayBox {
-  x: number;       // px from left of image
-  y: number;       // px from top of image
-  w: number;       // px width
-  h: number;       // px height
-  rotation?: number; // degrees
-  label?: string;
-}
-
-type Face = 'top' | 'front' | 'right' | 'left' | 'bottom' | 'back';
 ```
 
-### 3.2 Feature Analysis Output
+### The Standard Overlay Contract
 
-The AI returns this from `analyzeFeaturesFlow`. The frontend uses it for the feature checklist and overlay arrows.
+All UI drawing uses a normalized coordinate space `0.0` to `1000.0`. The origin `(0,0)` is the top-left of the original uploaded image. `(1000, 1000)` is the bottom-right.
 
 ```ts
-interface FeatureResult {
-  features: Feature[];
+interface OverlaySpec {
+  boxes: Array<{ x: number; y: number; w: number; h: number; label?: string; strokeColor?: string }>;
+  lines: Array<{ x1: number; y1: number; x2: number; y2: number; label?: string; strokeColor?: string }>;
+  points: Array<{ x: number; y: number; label?: string; color?: string }>;
+  arrows: Array<{ fromX: number; fromY: number; toX: number; toY: number; label?: string; strokeColor?: string }>;
+}
+```
+
+### Generic Step Result & Component Proposals
+
+```ts
+interface OrientationStepResult {
+  proposalData: any;          // The structured data proposed for this step
+  overlay: OverlaySpec;       // What to draw on the image
+  question: string;           // The Yes/No question for the UI
+  cropWindow?: {              // Optional: zoom the UI to this area (0-1000 normalized)
+    x: number; y: number; w: number; h: number
+  };
 }
 
-interface Feature {
-  id: string;                 // "A", "B", "C", etc.
-  type: FeatureType;
-  label: string;              // Human-readable, e.g. "Ø8.0 THRU hole"
-  face: Face;                 // Which face the feature enters from
-  dimensions: FeatureDim[];   // All relevant dimensions
-  overlay: OverlayArrow;      // Arrow pointing to feature on the print
-  approved: boolean;          // Starts false, user sets to true
+interface ViewLayout {
+  id: string;                 // "front", "top", "iso", "section-A"
+  label: string;
+  isPrimary: boolean;
+  boundingBox: { x: number; y: number; w: number; h: number }; // 0-1000
 }
 
-type FeatureType =
-  | 'thru_hole'
-  | 'blind_hole'
-  | 'counterbore'
-  | 'countersink'
-  | 'thread'
-  | 'outer_pocket'
-  | 'inner_pocket'
-  | 'irregular_pocket'
-  | 'slot'
-  | 'chamfer'
-  | 'fillet'
-  | 'step'
-  | 'boss'
-  | 'radius';
-
-interface FeatureDim {
-  name: string;        // "diameter", "depth", "width", etc.
+interface DimensionProposal {
   value: number;
   unit: 'mm' | 'in';
-  tolerance?: string;  // e.g. "±0.1"
+  sourceViewId: string;
+  confidence: number;
 }
 
-interface OverlayArrow {
-  fromX: number;       // arrow tail (in label area)
-  fromY: number;
-  toX: number;         // arrow head (pointing at feature)
-  toY: number;
-  label: string;       // e.g. "A"
-}
-```
-
-### 3.3 CSG Build Instruction
-
-After all features are approved, the lib layer converts `FeatureResult` into CSG operations.
-
-```ts
-interface CSGInstruction {
-  stock: { length: number; width: number; height: number; };
-  operations: CSGOperation[];
-}
-
-interface CSGOperation {
-  featureId: string;
-  type: 'subtract';           // Almost always subtract for machining
-  tool: 'cylinder' | 'box' | 'chamfer_tool' | 'fillet_tool';
-  position: { x: number; y: number; z: number; };
-  rotation: { x: number; y: number; z: number; };  // Euler angles
-  dimensions: Record<string, number>;               // tool-specific dims
+interface DatumProposal {
+  primaryFace: 'top' | 'front' | 'right' | 'left' | 'bottom' | 'back';
+  axisLabels: { x: 'L'|'W'|'D', y: 'L'|'W'|'D', z: 'L'|'W'|'D' };
 }
 ```
 
 ---
 
-## 4. AI Reasoning Strategy
+## 4. Non-Goals for Phase 1
 
-### Why multi-pass instead of one-shot?
-
-A single prompt asking "analyze this entire print and build a 3D model" will fail because:
-1. **Dimension ambiguity** — The same measurement (e.g., 120.0mm) might appear on multiple views. The AI must reason about which view is the most reliable source for Length vs Width vs Height by considering orientation.
-2. **Feature density** — Cluttered prints with many callouts overwhelm a single prompt. Breaking into envelope → features keeps each prompt focused.
-3. **User feedback** — Humans catch errors the AI misses. The iterative loop means wrong answers get corrected early, not compounded.
-
-### Envelope Pass Reasoning Chain
-1. Identify all views on the print (top, front, right, isometric, sections, details).
-2. For each view, identify which global dimension (L, W, H) each measurement corresponds to.
-3. Cross-reference: if "120.0" appears in the top view as horizontal and in the front view as horizontal, they are likely the same dimension (Length).
-4. Pick the orientation (which axis is L, W, H) that is most internally consistent.
-5. Identify the primary datum face.
-
-### Feature Pass Reasoning Chain
-1. With the envelope locked, scan each view for features that cut into the stock.
-2. For each feature, determine: what type it is, which face it enters from, its dimensions.
-3. The AI may zoom/crop views to reduce clutter when identifying fine details.
-4. Features are labeled A, B, C, … and linked to the specific callout text on the print.
-
----
-
-## 5. Component Interaction
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        Next.js App                          │
-│                                                             │
-│  ┌──────────────┐   ┌──────────────┐   ┌────────────────┐  │
-│  │ ChatInterface│   │ PrintViewer  │   │ ValidationPanel│  │
-│  │              │   │ (overlays)   │   │ (checkboxes)   │  │
-│  └──────┬───────┘   └──────▲───────┘   └───────┬────────┘  │
-│         │                  │                   │            │
-│         │         ┌────────┴────────┐          │            │
-│         └────────▶│ Session State   │◀─────────┘            │
-│                   │ (useReducer)    │                        │
-│                   └────────┬────────┘                        │
-│                            │                                │
-│                   ┌────────▼────────┐                        │
-│                   │ API Route       │                        │
-│                   │ /api/genkit     │                        │
-│                   └────────┬────────┘                        │
-│                            │                                │
-│  ┌─────────────────────────▼──────────────────────────────┐ │
-│  │              Genkit Flows (server)                      │ │
-│  │  analyzeEnvelopeFlow  │  analyzeFeaturesFlow           │ │
-│  └────────────────────────────────────────────────────────┘ │
-│                                                             │
-│  ┌───────────────┐                                          │
-│  │ ThreeViewer   │ ◀── CSG Pipeline (src/lib/)              │
-│  │ (3D canvas)   │                                          │
-│  └───────────────┘                                          │
-└─────────────────────────────────────────────────────────────┘
-```
-
----
-
-## 6. Deployment
-
-- **Local dev**: `npm run dev` — standard Next.js dev server.
-- **Genkit dev UI**: `genkit start -- npm run dev` — enables Genkit's flow inspection UI.
-- **Production**: Deploy to Google Cloud Run via the Cloud Run MCP, or Vercel.
-- **Environment**: Only `GEMINI_API_KEY` is required. See `.env.example`.
+- No recognizing pockets, holes, radii, or slots.
+- No parsing of threads or geometric tolerances (GD&T).
+- No 3D CSG boolean operations.
+- No `three-bvh` setup.
