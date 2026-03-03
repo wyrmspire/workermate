@@ -6,6 +6,7 @@ import { ViewLayout, DimensionProposal } from '@/lib/schemas';
 export async function POST(req: NextRequest) {
     let body: {
         fileUri: string;
+        mimeType?: string;
         confirmedViews: ViewLayout[];
         confirmedLW: { length: DimensionProposal; width: DimensionProposal };
         confirmedDepth: DimensionProposal;
@@ -39,6 +40,7 @@ export async function POST(req: NextRequest) {
         const { orientationFlowStep5_FinalSummary } = await import('@/agent/orientationFlowStep5_FinalSummary');
         const result = await orientationFlowStep5_FinalSummary({
             fileUri: body.fileUri,
+            mimeType: body.mimeType,
             confirmedViews: body.confirmedViews,
             confirmedLW: body.confirmedLW,
             confirmedDepth: body.confirmedDepth,

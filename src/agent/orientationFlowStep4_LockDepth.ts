@@ -4,6 +4,7 @@ import { OrientationStepResultSchema, ViewLayoutSchema, DimensionProposalSchema 
 
 const Step4InputSchema = z.object({
     fileUri: z.string(),
+    mimeType: z.string().optional(),
     confirmedViews: z.array(ViewLayoutSchema),
     confirmedLW: z.object({
         length: DimensionProposalSchema,
@@ -12,7 +13,9 @@ const Step4InputSchema = z.object({
     rejectionFeedback: z.string().optional(),
 });
 
-const Step4OutputSchema = OrientationStepResultSchema;
+const Step4OutputSchema = OrientationStepResultSchema.extend({
+    proposalData: DimensionProposalSchema,
+});
 
 export const orientationFlowStep4_LockDepth = ai.defineFlow(
     {
@@ -90,12 +93,14 @@ The sourceViewId MUST reference a non-primary view.`;
         const { output } = await ai.generate({
             model: 'googleai/gemini-3-flash-preview',
             config: {
-                thinkingLevel: 'HIGH',
-                mediaResolution: 'high',
+                thinkingConfig: { thinkingLevel: 'HIGH' },
             },
             output: { schema: Step4OutputSchema },
             prompt: [
-                { media: { url: input.fileUri } },
+                {
+                    media: { url: input.fileUri, contentType: input.mimeType ?? 'image/png' },
+                    metadata: { mediaResolution: { level: 'MEDIA_RESOLUTION_HIGH' } },
+                },
                 { text: systemPrompt + rejectionNote },
             ],
         });
@@ -107,6 +112,7 @@ The sourceViewId MUST reference a non-primary view.`;
         return {
             ...output,
             question: 'Is this the correct depth (thickness) dimension?',
+            cropWindow: null,
         };
     }
 );

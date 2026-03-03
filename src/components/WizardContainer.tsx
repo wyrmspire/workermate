@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useReducer, useRef, useCallback } from 'react';
+import { z } from 'zod';
 import ImageOverlay from './ImageOverlay';
 import YesNoPanel from './YesNoPanel';
 import StepHistory from './StepHistory';
@@ -10,6 +11,7 @@ import {
     WizardState,
     OrientationStepResult,
     ViewLayout,
+    ViewLayoutSchema,
     DimensionProposal,
     DatumProposal,
 } from '@/lib/schemas';
@@ -38,7 +40,7 @@ const initialState: WizardUIState = {
 
 type Action =
     | { type: 'UPLOAD_START' }
-    | { type: 'UPLOAD_SUCCESS'; imageSrc: string; fileUri: string }
+    | { type: 'UPLOAD_SUCCESS'; imageSrc: string; fileUri: string; mimeType: string }
     | { type: 'STEP_START' }
     | { type: 'STEP_RESULT'; result: OrientationStepResult }
     | { type: 'ADVANCE_TO_STEP_1' }         // UPLOADED → ORIENT_STEP_1
@@ -61,7 +63,7 @@ function reducer(state: WizardUIState, action: Action): WizardUIState {
                 ...state,
                 isLoading: false,
                 imageSrc: action.imageSrc,
-                session: { ...state.session, fileUri: action.fileUri, currentState: 'UPLOADED' },
+                session: { ...state.session, fileUri: action.fileUri, mimeType: action.mimeType, currentState: 'UPLOADED' },
             };
 
         case 'STEP_START':
@@ -180,6 +182,7 @@ export default function WizardContainer() {
             try {
                 const body: Record<string, unknown> = {
                     fileUri,
+                    mimeType: currentSession.mimeType ?? 'image/png',
                     ...(rejectionFeedback ? { rejectionFeedback } : {}),
                 };
                 if (stepNum >= 2 && currentSession.confirmedViews)
@@ -198,8 +201,11 @@ export default function WizardContainer() {
                 });
 
                 if (!res.ok) {
-                    const err = await res.json().catch(() => ({}));
-                    throw new Error(err.error ?? `Step ${stepNum} failed (${res.status})`);
+                    const err = await res.json().catch(() => ({} as Record<string, unknown>));
+                    const errorText = typeof err.error === 'string' ? err.error : '';
+                    const detailsText = typeof err.details === 'string' ? err.details : '';
+                    const combined = [errorText, detailsText].filter(Boolean).join(': ');
+                    throw new Error(combined || `Step ${stepNum} failed (${res.status})`);
                 }
 
                 const result: OrientationStepResult = await res.json();
@@ -241,12 +247,12 @@ export default function WizardContainer() {
                     URL.revokeObjectURL(blobUrl);
                     throw new Error(err.error ?? `Upload failed (${res.status})`);
                 }
-                const { fileUri } = await res.json();
-                dispatch({ type: 'UPLOAD_SUCCESS', imageSrc: blobUrl, fileUri });
+                const { fileUri, mimeType } = await res.json();
+                dispatch({ type: 'UPLOAD_SUCCESS', imageSrc: blobUrl, fileUri, mimeType });
                 dispatch({ type: 'ADVANCE_TO_STEP_1' });
 
                 // Auto kick off step 1 with the fresh fileUri
-                const stepSession: OrientationSession = { fileUri, currentState: 'ORIENT_STEP_1' };
+                const stepSession: OrientationSession = { fileUri, mimeType, currentState: 'ORIENT_STEP_1' };
                 await callStep(1, fileUri, stepSession);
             } catch (err) {
                 const msg = err instanceof Error ? err.message : String(err);
@@ -280,7 +286,19 @@ export default function WizardContainer() {
 
         switch (wizardState) {
             case 'ORIENT_STEP_1': {
-                const views = Array.isArray(data) ? (data as ViewLayout[]) : [];
+                const parsedViews = z.array(ViewLayoutSchema).safeParse(data);
+                if (!parsedViews.success) {
+                    dispatch({
+                        type: 'SET_ERROR',
+                        message: `Step 1 returned invalid views payload: ${parsedViews.error.issues[0]?.message ?? 'validation failed'}`,
+                    });
+                    return;
+                }
+                const views = parsedViews.data;
+                if (views.length === 0) {
+                    dispatch({ type: 'SET_ERROR', message: 'Step 1 returned zero views. Please retry Step 1.' });
+                    return;
+                }
                 dispatch({ type: 'CONFIRM_STEP_1', views });
                 const nextSession: OrientationSession = {
                     ...session,
@@ -451,7 +469,7 @@ export default function WizardContainer() {
                     <ImageOverlay
                         imageSrc={imageSrc}
                         overlay={lastResult.overlay}
-                        cropWindow={lastResult.cropWindow}
+                        cropWindow={lastResult.cropWindow ?? undefined}
                     />
                 )}
 

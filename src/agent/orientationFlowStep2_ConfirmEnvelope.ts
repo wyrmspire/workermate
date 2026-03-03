@@ -1,14 +1,17 @@
 import { z } from 'zod';
 import { ai } from './genkit.config';
-import { OrientationStepResultSchema, ViewLayoutSchema } from '../lib/schemas';
+import { OrientationStepResultSchema, ViewLayoutSchema, OverlaySpecSchema } from '../lib/schemas';
 
 const Step2InputSchema = z.object({
     fileUri: z.string(),
+    mimeType: z.string().optional(),
     confirmedViews: z.array(ViewLayoutSchema),
     rejectionFeedback: z.string().optional(),
 });
 
-const Step2OutputSchema = OrientationStepResultSchema;
+const Step2OutputSchema = OrientationStepResultSchema.extend({
+    proposalData: OverlaySpecSchema,
+});
 
 export const orientationFlowStep2_ConfirmEnvelope = ai.defineFlow(
     {
@@ -17,8 +20,24 @@ export const orientationFlowStep2_ConfirmEnvelope = ai.defineFlow(
         outputSchema: Step2OutputSchema,
     },
     async (input) => {
-        const primaryView = input.confirmedViews.find((v) => v.isPrimary);
-        const primaryBox = primaryView?.boundingBox ?? { x: 0, y: 0, w: 1000, h: 1000 };
+        // Build a description of ALL confirmed views for the prompt
+        const viewList = input.confirmedViews
+            .map((v, i) => {
+                const tag = v.isPrimary ? ' [PRIMARY]' : '';
+                return `  ${i + 1}. id="${v.id}", label="${v.label}"${tag}, box=(x=${v.boundingBox.x}, y=${v.boundingBox.y}, w=${v.boundingBox.w}, h=${v.boundingBox.h})`;
+            })
+            .join('\n');
+
+        // Assign distinct colors per view
+        const viewColors = ['#FF0000', '#00BFFF', '#FF8C00', '#9400D3', '#32CD32', '#FFD700'];
+        const viewColorMap = input.confirmedViews.map((v, i) => ({
+            id: v.id,
+            label: v.label,
+            color: viewColors[i % viewColors.length],
+        }));
+        const colorLegend = viewColorMap
+            .map((vc) => `  - "${vc.label}" (id: "${vc.id}"): use strokeColor "${vc.color}"`)
+            .join('\n');
 
         const systemPrompt = `You are analyzing a machinist technical drawing (print).
 
@@ -29,37 +48,47 @@ COORDINATE SYSTEM (CRITICAL):
 - All coordinates MUST be within 0–1000 inclusive.
 - Box validity: w > 0, h > 0, x + w <= 1000, y + h <= 1000.
 
-STEP 1 RESULTS (already confirmed by user):
-Primary view: "${primaryView?.label ?? 'Front'}" (id: "${primaryView?.id ?? 'front'}")
-Primary view bounding box: x=${primaryBox.x}, y=${primaryBox.y}, w=${primaryBox.w}, h=${primaryBox.h}
+STEP 1 RESULTS (confirmed by user):
+The following views were detected:
+${viewList}
 
-YOUR TASK — Step 2: Confirm Part Outline Envelope.
-Within the primary view bounding box above, find the TIGHTEST bounding box that encompasses ONLY the physical part geometry.
+YOUR TASK — Step 2: Confirm Part Outline Envelopes in ALL Views.
+
+For EACH view listed above, find the TIGHTEST bounding box that encompasses ONLY the physical part geometry within that view.
+
 EXCLUDE: dimension lines, leader lines, extension lines, center lines, notes, tolerances, title block text, arrows, and any annotation that is not part of the physical geometry outline.
 INCLUDE: only the solid outline of the physical part itself.
 
-The envelope box MUST be fully inside the primary view bounding box.
-Use normalized 0–1000 global coordinates (NOT local coordinates relative to the primary view).
+Each envelope box MUST be fully inside its corresponding view bounding box.
+Use normalized 0–1000 global coordinates (NOT local coordinates relative to the view).
+
+Assign each view's envelope a different stroke color:
+${colorLegend}
 
 Return your answer as a JSON object:
 {
   "proposalData": {
-    "boxes": [{ "x": <number>, "y": <number>, "w": <number>, "h": <number> }],
+    "boxes": [
+      { "x": <number>, "y": <number>, "w": <number>, "h": <number>, "label": "<view label> Envelope", "strokeColor": "<color>" }
+    ],
     "lines": [],
     "points": [],
     "arrows": []
   },
   "overlay": {
-    "boxes": [{ "x": <number>, "y": <number>, "w": <number>, "h": <number>, "label": "Part Envelope", "strokeColor": "#FF0000" }],
+    "boxes": [
+      { "x": <number>, "y": <number>, "w": <number>, "h": <number>, "label": "<view label> Envelope", "strokeColor": "<color>" }
+    ],
     "lines": [],
     "points": [],
     "arrows": []
   },
-  "question": "Does this box accurately capture the overall part envelope in the primary view?",
-  "cropWindow": { "x": ${primaryBox.x}, "y": ${primaryBox.y}, "w": ${primaryBox.w}, "h": ${primaryBox.h} }
+  "question": "Do these boxes accurately capture the part outline in each view?"
 }
 
-The "question" field MUST be exactly: "Does this box accurately capture the overall part envelope in the primary view?"`;
+Return one envelope box per view. The proposalData and overlay should contain the SAME boxes.
+Do NOT include a cropWindow — the user needs to see ALL views at once.
+The "question" field MUST be exactly: "Do these boxes accurately capture the part outline in each view?"`;
 
         const rejectionNote = input.rejectionFeedback
             ? `\n\nThe user rejected your previous proposal. Their feedback: "${input.rejectionFeedback}". Try again with a revised answer.`
@@ -68,12 +97,14 @@ The "question" field MUST be exactly: "Does this box accurately capture the over
         const { output } = await ai.generate({
             model: 'googleai/gemini-3-flash-preview',
             config: {
-                thinkingLevel: 'MINIMAL',
-                mediaResolution: 'medium',
+                thinkingConfig: { thinkingLevel: 'MINIMAL' },
             },
             output: { schema: Step2OutputSchema },
             prompt: [
-                { media: { url: input.fileUri } },
+                {
+                    media: { url: input.fileUri, contentType: input.mimeType ?? 'image/png' },
+                    metadata: { mediaResolution: { level: 'MEDIA_RESOLUTION_MEDIUM' } },
+                },
                 { text: systemPrompt + rejectionNote },
             ],
         });
@@ -84,13 +115,8 @@ The "question" field MUST be exactly: "Does this box accurately capture the over
 
         return {
             ...output,
-            question: 'Does this box accurately capture the overall part envelope in the primary view?',
-            cropWindow: output.cropWindow ?? {
-                x: primaryBox.x,
-                y: primaryBox.y,
-                w: primaryBox.w,
-                h: primaryBox.h,
-            },
+            question: 'Do these boxes accurately capture the part outline in each view?',
+            cropWindow: null, // No zoom — show all views
         };
     }
 );

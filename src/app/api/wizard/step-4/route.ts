@@ -6,6 +6,7 @@ import { ViewLayout, DimensionProposal } from '@/lib/schemas';
 export async function POST(req: NextRequest) {
     let body: {
         fileUri: string;
+        mimeType?: string;
         confirmedViews: ViewLayout[];
         confirmedLW: { length: DimensionProposal; width: DimensionProposal };
         rejectionFeedback?: string;
@@ -35,6 +36,7 @@ export async function POST(req: NextRequest) {
         const { orientationFlowStep4_LockDepth } = await import('@/agent/orientationFlowStep4_LockDepth');
         const result = await orientationFlowStep4_LockDepth({
             fileUri: body.fileUri,
+            mimeType: body.mimeType,
             confirmedViews: body.confirmedViews,
             confirmedLW: body.confirmedLW,
             rejectionFeedback: body.rejectionFeedback,

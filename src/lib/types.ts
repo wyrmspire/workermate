@@ -8,6 +8,7 @@ import {
 
 export interface OrientationSession {
     fileUri: string;
+    mimeType?: string;
     currentState: WizardState;
 
     // Accumulated truth:

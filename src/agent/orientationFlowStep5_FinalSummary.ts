@@ -1,9 +1,10 @@
 import { z } from 'zod';
 import { ai } from './genkit.config';
-import { OrientationStepResultSchema, ViewLayoutSchema, DimensionProposalSchema } from '../lib/schemas';
+import { OrientationStepResultSchema, ViewLayoutSchema, DimensionProposalSchema, DatumProposalSchema } from '../lib/schemas';
 
 const Step5InputSchema = z.object({
     fileUri: z.string(),
+    mimeType: z.string().optional(),
     confirmedViews: z.array(ViewLayoutSchema),
     confirmedLW: z.object({
         length: DimensionProposalSchema,
@@ -13,7 +14,9 @@ const Step5InputSchema = z.object({
     rejectionFeedback: z.string().optional(),
 });
 
-const Step5OutputSchema = OrientationStepResultSchema;
+const Step5OutputSchema = OrientationStepResultSchema.extend({
+    proposalData: DatumProposalSchema,
+});
 
 export const orientationFlowStep5_FinalSummary = ai.defineFlow(
     {
@@ -97,12 +100,14 @@ ${primaryBox ? `- Place origin near: x=${Math.round(primaryBox.x + primaryBox.w 
         const { output } = await ai.generate({
             model: 'googleai/gemini-3-flash-preview',
             config: {
-                thinkingLevel: 'HIGH',
-                mediaResolution: 'high',
+                thinkingConfig: { thinkingLevel: 'HIGH' },
             },
             output: { schema: Step5OutputSchema },
             prompt: [
-                { media: { url: input.fileUri } },
+                {
+                    media: { url: input.fileUri, contentType: input.mimeType ?? 'image/png' },
+                    metadata: { mediaResolution: { level: 'MEDIA_RESOLUTION_HIGH' } },
+                },
                 { text: systemPrompt + rejectionNote },
             ],
         });

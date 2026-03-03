@@ -17,30 +17,35 @@ export const MOCK_STEP_1: OrientationStepResult = {
 
 export const MOCK_STEP_2: OrientationStepResult = {
     proposalData: {
-        boxes: [{ x: 60, y: 60, w: 380, h: 380 }],
+        boxes: [
+            { x: 60, y: 60, w: 380, h: 380, label: 'Primary View Envelope', strokeColor: '#FF0000' },
+            { x: 510, y: 60, w: 180, h: 380, label: 'Side View Envelope', strokeColor: '#00BFFF' }
+        ],
         lines: [], points: [], arrows: []
     },
     overlay: {
-        boxes: [{ x: 60, y: 60, w: 380, h: 380, label: 'Part Envelope', strokeColor: '#FF0000' }],
+        boxes: [
+            { x: 60, y: 60, w: 380, h: 380, label: 'Primary View Envelope', strokeColor: '#FF0000' },
+            { x: 510, y: 60, w: 180, h: 380, label: 'Side View Envelope', strokeColor: '#00BFFF' }
+        ],
         lines: [], points: [], arrows: []
     },
-    question: 'Does this box accurately capture the overall part envelope in the primary view?',
-    cropWindow: { x: 50, y: 50, w: 400, h: 400 }
+    question: 'Do these boxes accurately capture the part outline in each view?'
 };
 
 export const MOCK_STEP_3: OrientationStepResult = {
     proposalData: {
         length: { value: 120, unit: 'mm', sourceViewId: 'view-1', confidence: 0.95 },
-        width: { value: 80, unit: 'mm', sourceViewId: 'view-1', confidence: 0.90 }
+        width: { value: 80, unit: 'mm', sourceViewId: 'view-2', confidence: 0.90 }
     },
     overlay: {
         boxes: [], lines: [], points: [],
         arrows: [
-            { fromX: 70, fromY: 480, toX: 250, toY: 450, label: 'Length (L): 120mm' },
-            { fromX: 480, fromY: 100, toX: 450, toY: 250, label: 'Width (W): 80mm' }
+            { fromX: 70, fromY: 480, toX: 250, toY: 450, label: 'Length (L): 120mm', strokeColor: '#00FF00' },
+            { fromX: 550, fromY: 480, toX: 600, toY: 250, label: 'Width (W): 80mm', strokeColor: '#00BFFF' }
         ]
     },
-    question: 'Are the Length and Width axes and values correct for this primary view?'
+    question: 'Are the Length and Width values correct? Check the source views.'
 };
 
 export const MOCK_STEP_4: OrientationStepResult = {

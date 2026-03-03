@@ -35,10 +35,10 @@ export const ArrowSchema = z.object({
 });
 
 export const OverlaySpecSchema = z.object({
-    boxes: z.array(BoxSchema),
-    lines: z.array(LineSchema),
-    points: z.array(PointSchema),
-    arrows: z.array(ArrowSchema)
+    boxes: z.array(BoxSchema).default([]),
+    lines: z.array(LineSchema).default([]),
+    points: z.array(PointSchema).default([]),
+    arrows: z.array(ArrowSchema).default([])
 });
 
 export const ViewLayoutSchema = z.object({
@@ -71,14 +71,19 @@ export const DatumProposalSchema = z.object({
 
 export const OrientationStepResultSchema = z.object({
     proposalData: z.any(),
-    overlay: OverlaySpecSchema,
+    overlay: OverlaySpecSchema.default({
+        boxes: [],
+        lines: [],
+        points: [],
+        arrows: []
+    }),
     question: z.string(),
     cropWindow: z.object({
         x: z.number().min(0).max(1000),
         y: z.number().min(0).max(1000),
         w: z.number().min(0).max(1000),
         h: z.number().min(0).max(1000)
-    }).optional()
+    }).nullable().optional()
 });
 
 export const WizardStateSchema = z.enum([

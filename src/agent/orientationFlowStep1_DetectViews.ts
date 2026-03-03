@@ -4,10 +4,13 @@ import { OrientationStepResultSchema, ViewLayoutSchema } from '../lib/schemas';
 
 const Step1InputSchema = z.object({
   fileUri: z.string(),
+  mimeType: z.string().optional(),
   rejectionFeedback: z.string().optional(),
 });
 
-const Step1OutputSchema = OrientationStepResultSchema;
+const Step1OutputSchema = OrientationStepResultSchema.extend({
+  proposalData: z.array(ViewLayoutSchema),
+});
 
 export const orientationFlowStep1_DetectViews = ai.defineFlow(
   {
@@ -50,8 +53,7 @@ Return your answer as a JSON object matching this EXACT schema:
     "points": [],
     "arrows": []
   },
-  "question": "Are these the bounding boxes for the views, and is the highlighted one the primary view?",
-  "cropWindow": null
+  "question": "Are these the bounding boxes for the views, and is the highlighted one the primary view?"
 }
 
 Use strokeColor "#00FF00" (green) for the primary view box and "#FFFF00" (yellow) for all others.
@@ -65,12 +67,14 @@ The "question" field MUST be exactly: "Are these the bounding boxes for the view
     const { output } = await ai.generate({
       model: 'googleai/gemini-3-flash-preview',
       config: {
-        thinkingLevel: 'MINIMAL',
-        mediaResolution: 'medium',
+        thinkingConfig: { thinkingLevel: 'MINIMAL' },
       },
       output: { schema: Step1OutputSchema },
       prompt: [
-        { media: { url: input.fileUri } },
+        {
+          media: { url: input.fileUri, contentType: input.mimeType ?? 'image/png' },
+          metadata: { mediaResolution: { level: 'MEDIA_RESOLUTION_MEDIUM' } },
+        },
         { text: systemPrompt + rejectionNote },
       ],
     });

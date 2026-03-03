@@ -6,6 +6,7 @@ import { ViewLayout, OverlaySpec } from '@/lib/schemas';
 export async function POST(req: NextRequest) {
     let body: {
         fileUri: string;
+        mimeType?: string;
         confirmedViews: ViewLayout[];
         confirmedEnvelope: OverlaySpec;
         rejectionFeedback?: string;
@@ -35,6 +36,7 @@ export async function POST(req: NextRequest) {
         const { orientationFlowStep3_LockLW } = await import('@/agent/orientationFlowStep3_LockLW');
         const result = await orientationFlowStep3_LockLW({
             fileUri: body.fileUri,
+            mimeType: body.mimeType,
             confirmedViews: body.confirmedViews,
             confirmedEnvelope: body.confirmedEnvelope,
             rejectionFeedback: body.rejectionFeedback,
